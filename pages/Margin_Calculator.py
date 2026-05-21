@@ -338,14 +338,25 @@ def margin_color_class(pct: float) -> str:
 def get_sheet_data():
     try:
         scope = ['https://www.googleapis.com/auth/spreadsheets.readonly']
+        # 1. First get the Spreadsheet ID
+        spreadsheet_id = ""
+        try:
+            if "MARGIN_SPREADSHEET_ID" in st.secrets:
+                spreadsheet_id = st.secrets["MARGIN_SPREADSHEET_ID"]
+        except Exception:
+            pass
+        if not spreadsheet_id:
+            spreadsheet_id = os.getenv("MARGIN_SPREADSHEET_ID", "")
+            
+        # 2. Get the credentials
         try:
             creds_dict = dict(st.secrets["gcp_service_account"])
-            spreadsheet_id = st.secrets["gcp_service_account"]["SPREADSHEET_ID"]
         except Exception:
             _sa = os.path.join(_ROOT, 'service_account.json')
+            if not os.path.exists(_sa):
+                return None, "Google Sheets connection is not configured in st.secrets or service_account.json"
             with open(_sa, 'r') as f:
                 creds_dict = json.load(f)
-            spreadsheet_id = os.getenv("MARGIN_SPREADSHEET_ID", "")
 
         credentials = Credentials.from_service_account_info(creds_dict, scopes=scope)
         gc = gspread.authorize(credentials)

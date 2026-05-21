@@ -171,12 +171,23 @@ def load_data():
         else:
             # 2. Fallback to local file if running locally
             _sa = os.path.join(_ROOT, 'service_account.json')
+            if not os.path.exists(_sa):
+                st.error("Authentication Error: Google Sheets credentials not found in st.secrets or service_account.json")
+                return pd.DataFrame()
             gc = gspread.service_account(filename=_sa)
         
         # Open the Google Sheet by its ID from centralized .env
-        sheet_id = os.getenv("CS_SHEET_ID")
+        sheet_id = ""
+        try:
+            if "CS_SHEET_ID" in st.secrets:
+                sheet_id = st.secrets["CS_SHEET_ID"]
+        except Exception:
+            pass
         if not sheet_id:
-            st.error("Authentication Error: CS_SHEET_ID not found in environment variables.")
+            sheet_id = os.getenv("CS_SHEET_ID")
+            
+        if not sheet_id:
+            st.error("Authentication Error: CS_SHEET_ID not found in environment variables or secrets.")
             return pd.DataFrame()
         spreadsheet = gc.open_by_key(sheet_id)
         
