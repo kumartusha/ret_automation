@@ -26,7 +26,7 @@
 #                 return pd.DataFrame()
         
 #         # Open the Google Sheet by its ID (extracted from your link)
-#         sheet_id = "1zX7AQmHrZcV7G_PuWm1S29DYVbeelA-wI3rKax4hnlE"
+#         sheet_id = os.getenv("CS_SHEET_ID")
 #         spreadsheet = gc.open_by_key(sheet_id)
         
 #         # Fetch the specific sheet named 'Dump'
@@ -174,7 +174,10 @@ def load_data():
             gc = gspread.service_account(filename=_sa)
         
         # Open the Google Sheet by its ID from centralized .env
-        sheet_id = os.getenv("CS_SHEET_ID", "1zX7AQmHrZcV7G_PuWm1S29DYVbeelA-wI3rKax4hnlE")
+        sheet_id = os.getenv("CS_SHEET_ID")
+        if not sheet_id:
+            st.error("Authentication Error: CS_SHEET_ID not found in environment variables.")
+            return pd.DataFrame()
         spreadsheet = gc.open_by_key(sheet_id)
         
         # Fetch the specific sheet named 'Dump'
