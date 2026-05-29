@@ -77,16 +77,24 @@ def fetch_challan(vehicle_num: str) -> dict:
     return {"vehicle_num": vehicle_num, "success": False, "data": None, "error": last_err}
 
 
-def parse_csv(f):
+def parse_file(f):
     try:
-        df = pd.read_csv(f, dtype=str)
-        if df.empty: return [], "CSV is empty."
-        regs = df.iloc[:, 0].dropna().str.strip().str.upper().replace("", pd.NA).dropna().unique().tolist()
+        if f.name.endswith('.csv'):
+            df = pd.read_csv(f, dtype=str)
+        elif f.name.endswith('.txt'):
+            df = pd.read_csv(f, dtype=str, header=None)
+        elif f.name.endswith(('.xls', '.xlsx')):
+            df = pd.read_excel(f, dtype=str)
+        else:
+            return [], "Unsupported file type."
+            
+        if df.empty: return [], "File is empty."
+        regs = df.iloc[:, 0].dropna().astype(str).str.strip().str.upper().replace("", pd.NA).dropna().unique().tolist()
         if not regs: return [], "No valid reg numbers in first column."
-        if len(regs) > 250: return [], f"Limit exceeded: CSV contains {len(regs)} vehicles (Max 250 allowed)."
+        if len(regs) > 250: return [], f"Limit exceeded: File contains {len(regs)} vehicles (Max 250 allowed)."
         return regs, None
     except Exception as e:
-        return [], f"Failed to read CSV: {e}"
+        return [], f"Failed to read file: {e}"
 
 
 def to_rows(vehicle_num, result):
@@ -121,6 +129,7 @@ def to_rows(vehicle_num, result):
 def build_df(rows):
     if not rows: return pd.DataFrame()
     df = pd.DataFrame(rows)
+    df = df.astype(str)
     front = [c for c in ["reg_number","fetch_status","challan_index","error_message"] if c in df.columns]
     return df[front + [c for c in df.columns if c not in front]].reset_index(drop=True)
 
@@ -197,11 +206,24 @@ def push_to_sheets(df):
         sh = gc.open_by_key(SHEET_ID)
         try:    ws = sh.worksheet(WORKSHEET_NAME)
         except Exception: ws = sh.add_worksheet(title=WORKSHEET_NAME, rows=5000, cols=50)
+        
+        # Merge with existing data to avoid overwriting the whole sheet
+        existing_data = ws.get_all_records()
+        if existing_data:
+            existing_df = pd.DataFrame(existing_data)
+            if not existing_df.empty:
+                # Remove rows from existing_df that have reg_numbers present in our new df
+                if "reg_number" in existing_df.columns and "reg_number" in df.columns:
+                    existing_df = existing_df[~existing_df["reg_number"].astype(str).str.strip().str.upper().isin(df["reg_number"].astype(str).str.strip().str.upper())]
+                
+                # ALWAYS append the new rows to the existing data
+                df = pd.concat([existing_df, df], ignore_index=True)
+                
         clean = df.fillna("").astype(str)
         ws.clear()
-        ws.update([clean.columns.tolist()] + clean.values.tolist(), value_input_option="USER_ENTERED")
+        ws.update(values=[clean.columns.tolist()] + clean.values.tolist(), range_name="A1", value_input_option="USER_ENTERED")
         url = f"https://docs.google.com/spreadsheets/d/{SHEET_ID}"
-        return True, f"✅ {len(df)} rows pushed to **{WORKSHEET_NAME}** → [Open Sheet]({url})"
+        return True, f"✅ {len(df)} rows in **{WORKSHEET_NAME}** (appended new records) → [Open Sheet]({url})"
     except Exception as e:
         return False, f"❌ {e}"
 
@@ -218,13 +240,14 @@ def main():
         st.markdown('<div class="warn-box">⚠️ Challan lookup service is not configured. Please contact your admin.</div>', unsafe_allow_html=True)
 
     # ── Step 1: Upload ─────────────────────────────────────────────────
-    st.markdown('<div class="step-hd"><div class="step-num">1</div> Upload Registration Numbers CSV</div>', unsafe_allow_html=True)
-    uploaded = st.file_uploader("CSV with reg numbers in column 1", type=["csv"], label_visibility="collapsed", key="challan_upload")
+    st.markdown('<div class="step-hd"><div class="step-num">1</div> Upload Registration Numbers File</div>', unsafe_allow_html=True)
+    st.info("ℹ️ **Upload Guidelines:** Ensure your **first column** contains the vehicle registration numbers. The column header/name does not matter, and all other columns will be safely ignored.")
+    uploaded = st.file_uploader("Upload CSV, Excel, or TXT file with reg numbers in column 1", type=["csv", "xlsx", "xls", "txt"], label_visibility="collapsed", key="challan_upload")
 
     reg_numbers = []
 
     if uploaded:
-        reg_numbers, err = parse_csv(uploaded)
+        reg_numbers, err = parse_file(uploaded)
         if err:
             st.markdown(f'<div class="err-box">❌ {err}</div>', unsafe_allow_html=True)
         else:
@@ -288,12 +311,7 @@ def main():
         with st.expander("📊 Preview Results", expanded=True):
             st.dataframe(df, use_container_width=True, hide_index=True)
 
-        st.markdown("#### ⬇️ Download")
-        c1, c2, _ = st.columns([1, 1, 2])
-        with c1:
-            st.download_button("📥 CSV", data=to_csv(df), file_name="challan_data.csv", mime="text/csv", use_container_width=True)
-        with c2:
-            st.download_button("📊 Excel", data=to_excel(df), file_name="challan_data.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", use_container_width=True)
+
 
         st.markdown("#### 📄 Push to Google Sheets")
         if not SHEET_ID:
